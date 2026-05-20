@@ -51,7 +51,13 @@ function requireDatabaseConfiguration() {
 }
 
 function getDatabaseUrl() {
-  return process.env.DATABASE_URL || 'postgresql://localhost:5432/expense_tracker';
+  const databaseUrl = process.env.DATABASE_URL;
+
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL is not set. Configure a PostgreSQL connection string in the environment.');
+  }
+
+  return databaseUrl;
 }
 
 
