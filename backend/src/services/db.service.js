@@ -247,11 +247,23 @@ export async function initializeDatabase() {
   const databaseUrl = getDatabaseUrl();
   console.log('Connecting to PostgreSQL database...');
 
-  pool = new Pool({
+  // Detect whether SSL is required (common on managed hosts like Render)
+  const shouldUseSsl = process.env.PGSSLMODE === 'require' || /render\.com/.test(databaseUrl) || process.env.NODE_ENV === 'production';
+
+  const poolConfig = {
     connectionString: databaseUrl,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,
-  });
+  };
+
+  if (shouldUseSsl) {
+    // For many managed Postgres providers (Render, Heroku) you can connect with ssl
+    // Disable strict certificate verification when using provider-managed certificates
+    // (set rejectUnauthorized=false). If you need stricter validation, provide CA certs.
+    poolConfig.ssl = { rejectUnauthorized: false };
+  }
+
+  pool = new Pool(poolConfig);
 
   pool.on('error', (error) => {
     console.error('Unexpected error on idle client', error);
