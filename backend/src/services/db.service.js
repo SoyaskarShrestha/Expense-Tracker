@@ -1,15 +1,14 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { open } from 'sqlite';
-import sqlite3 from 'sqlite3';
+import pg from 'pg';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SEED_PATH = path.join(__dirname, '../../data/db.json');
 
-let db;
-let sqliteFilePath = '';
+let pool;
+const { Pool } = pg;
 
 export const userSelectColumns = 'id, name, email, password, role';
 export const expenseSelectColumns =
@@ -46,53 +45,41 @@ async function ensureColumn(tableName, columnName, definition) {
 }
 
 function requireDatabaseConfiguration() {
-  if (!db) {
-    throw new Error('SQLite database is not initialized. Call initializeDatabase() first.');
+  if (!pool) {
+    throw new Error('PostgreSQL database pool is not initialized. Call initializeDatabase() first.');
   }
 }
 
-function resolveSqlitePath() {
-  const configuredPath = process.env.SQLITE_PATH || './data/expense-tracker.sqlite';
-  if (path.isAbsolute(configuredPath)) {
-    return configuredPath;
-  }
-
-  return path.join(__dirname, '../../', configuredPath);
+function getDatabaseUrl() {
+  return process.env.DATABASE_URL || 'postgresql://localhost:5432/expense_tracker';
 }
 
-function getSeedTimestamp(baseTime, index) {
-  return new Date(baseTime + index).toISOString();
-}
-
-async function runStatements(database, statements) {
-  for (const statement of statements) {
-    await database.exec(statement);
-  }
-}
 
 function transformQuery(text) {
+  // PostgreSQL uses $1, $2 instead of ?, so no transformation needed
+  // Remove SQLite-specific syntax
   return text
-    .replace(/\$(\d+)/g, '?')
-    .replace(/::int/g, '')
-    .replace(/\bNOW\(\)/g, 'CURRENT_TIMESTAMP');
+    .replace(/::int/g, '::integer')
+    .replace(/CURRENT_TIMESTAMP/g, 'CURRENT_TIMESTAMP')
+    .replace(/NOW\(\)/g, 'NOW()');
 }
 
 async function runSql(text, params = []) {
   const sql = transformQuery(text);
   const normalized = sql.trim().toUpperCase();
 
-  if (normalized.startsWith('SELECT') || normalized.startsWith('PRAGMA')) {
-    const rows = await db.all(sql, params);
-    return { rows, rowCount: rows.length };
-  }
+  try {
+    const result = await pool.query(sql, params);
+    
+    if (normalized.startsWith('SELECT') || normalized.includes('RETURNING')) {
+      return { rows: result.rows, rowCount: result.rowCount };
+    }
 
-  if (normalized.includes('RETURNING')) {
-    const rows = await db.all(sql, params);
-    return { rows, rowCount: rows.length };
+    return { rows: result.rows || [], rowCount: result.rowCount ?? 0 };
+  } catch (error) {
+    console.error('SQL Error:', error.message, '\nQuery:', sql, '\nParams:', params);
+    throw error;
   }
-
-  const result = await db.run(sql, params);
-  return { rows: [], rowCount: result.changes ?? 0, lastID: result.lastID };
 }
 
 async function seedDatabase() {
@@ -100,131 +87,109 @@ async function seedDatabase() {
   const seed = JSON.parse(raw);
   const baseTime = Date.now();
 
-  const insertUser = await db.prepare(
-    `INSERT INTO users (id, name, email, password, role, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  );
-  const insertExpense = await db.prepare(
-    `INSERT INTO personal_expenses (
-      id,
-      user_id,
-      category,
-      amount,
-      description,
-      date,
-      payment_method,
-      recurrence,
-      reminder_enabled,
-      reminder_days_before,
-      created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  const insertOrg = await db.prepare(
-    `INSERT INTO organizations (id, name, description, head_id, created_at)
-     VALUES (?, ?, ?, ?, ?)`
-  );
-  const insertEmployee = await db.prepare(
-    `INSERT INTO employees (id, organization_id, name, email, role, joined_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
-  const insertRequest = await db.prepare(
-    `INSERT INTO money_requests (
-      id,
-      organization_id,
-      employee_id,
-      employee_name,
-      amount,
-      reason,
-      status,
-      requested_at,
-      responded_at,
-      responded_by,
-      response_note,
-      created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-
+  const client = await pool.connect();
   try {
-    await db.exec('BEGIN');
+    await client.query('BEGIN');
 
     let timestampIndex = 0;
 
     for (const user of seed.users || []) {
-      await insertUser.run(
-        user.id,
-        user.name,
-        String(user.email).toLowerCase(),
-        user.password,
-        user.role || 'user',
-        getSeedTimestamp(baseTime, (timestampIndex += 1))
+      await client.query(
+        `INSERT INTO users (id, name, email, password, role, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          user.id,
+          user.name,
+          String(user.email).toLowerCase(),
+          user.password,
+          user.role || 'user',
+          new Date(baseTime + (timestampIndex += 1)).toISOString(),
+        ]
       );
     }
 
     for (const expense of seed.personalExpenses || []) {
-      await insertExpense.run(
-        expense.id,
-        expense.userId,
-        expense.category,
-        Number(expense.amount),
-        expense.description,
-        expense.date,
-        expense.paymentMethod,
-        expense.recurrence || 'none',
-        expense.reminderEnabled ? 1 : 0,
-        Number(expense.reminderDaysBefore || 0),
-        getSeedTimestamp(baseTime, (timestampIndex += 1))
+      await client.query(
+        `INSERT INTO personal_expenses (
+          id, user_id, category, amount, description, date, payment_method,
+          recurrence, reminder_enabled, reminder_days_before, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          expense.id,
+          expense.userId,
+          expense.category,
+          Number(expense.amount),
+          expense.description,
+          expense.date,
+          expense.paymentMethod,
+          expense.recurrence || 'none',
+          expense.reminderEnabled ? true : false,
+          Number(expense.reminderDaysBefore || 0),
+          new Date(baseTime + (timestampIndex += 1)).toISOString(),
+        ]
       );
     }
 
     for (const organization of seed.organizations || []) {
-      await insertOrg.run(
-        organization.id,
-        organization.name,
-        organization.description,
-        organization.headId,
-        getSeedTimestamp(baseTime, (timestampIndex += 1))
+      await client.query(
+        `INSERT INTO organizations (id, name, description, head_id, created_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          organization.id,
+          organization.name,
+          organization.description,
+          organization.headId,
+          new Date(baseTime + (timestampIndex += 1)).toISOString(),
+        ]
       );
     }
 
     for (const employee of seed.employees || []) {
-      await insertEmployee.run(
-        employee.id,
-        employee.organizationId,
-        employee.name,
-        employee.email,
-        employee.role,
-        employee.joinedAt,
-        getSeedTimestamp(baseTime, (timestampIndex += 1))
+      await client.query(
+        `INSERT INTO employees (id, organization_id, name, email, role, joined_at, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          employee.id,
+          employee.organizationId,
+          employee.name,
+          employee.email,
+          employee.role,
+          employee.joinedAt,
+          new Date(baseTime + (timestampIndex += 1)).toISOString(),
+        ]
       );
     }
 
     for (const request of seed.moneyRequests || []) {
-      await insertRequest.run(
-        request.id,
-        request.organizationId,
-        request.employeeId,
-        request.employeeName,
-        Number(request.amount),
-        request.reason,
-        request.status || 'pending',
-        request.requestedAt,
-        request.respondedAt ?? null,
-        request.respondedBy ?? null,
-        request.responseNote ?? null,
-        getSeedTimestamp(baseTime, (timestampIndex += 1))
+      await client.query(
+        `INSERT INTO money_requests (
+          id, organization_id, employee_id, employee_name, amount, reason, status,
+          requested_at, responded_at, responded_by, response_note, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [
+          request.id,
+          request.organizationId,
+          request.employeeId,
+          request.employeeName,
+          Number(request.amount),
+          request.reason,
+          request.status || 'pending',
+          request.requestedAt,
+          request.respondedAt ?? null,
+          request.respondedBy ?? null,
+          request.responseNote ?? null,
+          new Date(baseTime + (timestampIndex += 1)).toISOString(),
+        ]
       );
     }
 
-    await db.exec('COMMIT');
+    await client.query('COMMIT');
+    console.log('Database seeded successfully');
   } catch (error) {
-    await db.exec('ROLLBACK');
+    await client.query('ROLLBACK');
     throw error;
   } finally {
-    await insertUser.finalize();
-    await insertExpense.finalize();
-    await insertOrg.finalize();
-    await insertEmployee.finalize();
-    await insertRequest.finalize();
+    client.release();
   }
 }
 
@@ -233,60 +198,96 @@ export async function query(text, params) {
   return runSql(text, params);
 }
 
+async function runStatements(poolOrClient, statements) {
+  for (const statement of statements) {
+    try {
+      await poolOrClient.query(statement);
+    } catch (error) {
+      // Ignore "already exists" errors for CREATE TABLE IF NOT EXISTS
+      if (!error.message.includes('already exists')) {
+        console.error('Error executing statement:', error.message);
+      }
+    }
+  }
+}
+
 export async function withTransaction(callback) {
   requireDatabaseConfiguration();
 
-  const client = {
-    query: (text, params) => runSql(text, params),
-  };
-
+  const client = await pool.connect();
   try {
-    await db.exec('BEGIN');
-    const result = await callback(client);
-    await db.exec('COMMIT');
+    await client.query('BEGIN');
+    
+    const queryWrapper = {
+      query: (text, params) => {
+        const sql = transformQuery(text);
+        return client.query(sql, params).then(result => ({
+          rows: result.rows,
+          rowCount: result.rowCount
+        }));
+      }
+    };
+
+    const result = await callback(queryWrapper);
+    await client.query('COMMIT');
     return result;
   } catch (error) {
-    await db.exec('ROLLBACK');
+    await client.query('ROLLBACK');
     throw error;
+  } finally {
+    client.release();
   }
 }
 
 export async function initializeDatabase() {
-  if (db) {
+  if (pool) {
     return;
   }
 
-  const databasePath = resolveSqlitePath();
-  sqliteFilePath = databasePath;
-  await fs.mkdir(path.dirname(databasePath), { recursive: true });
-  db = await open({
-    filename: databasePath,
-    driver: sqlite3.Database,
+  const databaseUrl = getDatabaseUrl();
+  console.log('Connecting to PostgreSQL database...');
+
+  pool = new Pool({
+    connectionString: databaseUrl,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000,
   });
 
-  await db.exec('PRAGMA foreign_keys = ON');
+  pool.on('error', (error) => {
+    console.error('Unexpected error on idle client', error);
+  });
 
-  await runStatements(db, [
+  try {
+    const client = await pool.connect();
+    console.log('Successfully connected to PostgreSQL');
+    client.release();
+  } catch (error) {
+    console.error('Failed to connect to PostgreSQL:', error);
+    throw error;
+  }
+
+  // Create tables if they don't exist
+  await runStatements(pool, [
     `CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT NOT NULL UNIQUE,
       password TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'user',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS personal_expenses (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       category TEXT NOT NULL,
-      amount REAL NOT NULL,
+      amount DECIMAL(12, 2) NOT NULL,
       description TEXT NOT NULL,
       date DATE NOT NULL,
       payment_method TEXT NOT NULL,
       recurrence TEXT NOT NULL DEFAULT 'none',
-      reminder_enabled INTEGER NOT NULL DEFAULT 0,
+      reminder_enabled BOOLEAN NOT NULL DEFAULT false,
       reminder_days_before INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE INDEX IF NOT EXISTS personal_expenses_user_created_idx
       ON personal_expenses (user_id, created_at DESC)`,
@@ -295,7 +296,7 @@ export async function initializeDatabase() {
       name TEXT NOT NULL,
       description TEXT NOT NULL,
       head_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE INDEX IF NOT EXISTS organizations_created_idx
       ON organizations (created_at DESC)`,
@@ -305,8 +306,8 @@ export async function initializeDatabase() {
       name TEXT NOT NULL,
       email TEXT NOT NULL,
       role TEXT NOT NULL,
-      joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE INDEX IF NOT EXISTS employees_org_created_idx
       ON employees (organization_id, created_at DESC)`,
@@ -315,26 +316,20 @@ export async function initializeDatabase() {
       organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
       employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
       employee_name TEXT NOT NULL,
-      amount REAL NOT NULL,
+      amount DECIMAL(12, 2) NOT NULL,
       reason TEXT NOT NULL,
       status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')),
-      requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      responded_at TEXT NULL,
+      requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      responded_at TIMESTAMP NULL,
       responded_by TEXT NULL REFERENCES users(id) ON DELETE SET NULL,
       response_note TEXT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE INDEX IF NOT EXISTS money_requests_created_idx
       ON money_requests (created_at DESC)`,
   ]);
 
-  await ensureColumn('personal_expenses', 'recurrence', "TEXT NOT NULL DEFAULT 'none'");
-  await ensureColumn('personal_expenses', 'reminder_enabled', 'INTEGER NOT NULL DEFAULT 0');
-  await ensureColumn('personal_expenses', 'reminder_days_before', 'INTEGER NOT NULL DEFAULT 0');
-
-  await ensureColumn('money_requests', 'responded_by', 'TEXT NULL REFERENCES users(id) ON DELETE SET NULL');
-  await ensureColumn('money_requests', 'response_note', 'TEXT NULL');
-
+  // Seed database if empty
   const { rows } = await query('SELECT COUNT(*) AS count FROM users');
   if (Number(rows[0]?.count || 0) === 0) {
     await seedDatabase();
@@ -342,13 +337,12 @@ export async function initializeDatabase() {
 }
 
 export async function closeDatabase() {
-  if (!db) {
+  if (!pool) {
     return;
   }
 
-  await db.close();
-  db = undefined;
-  sqliteFilePath = '';
+  await pool.end();
+  pool = undefined;
 }
 
 export async function getDatabaseDiagnostics() {
@@ -363,8 +357,8 @@ export async function getDatabaseDiagnostics() {
   ]);
 
   return {
-    provider: 'sqlite',
-    filePath: sqliteFilePath || resolveSqlitePath(),
+    provider: 'postgresql',
+    database_url: getDatabaseUrl(),
     tables: {
       users: Number(users.rows[0]?.count || 0),
       personalExpenses: Number(personalExpenses.rows[0]?.count || 0),
