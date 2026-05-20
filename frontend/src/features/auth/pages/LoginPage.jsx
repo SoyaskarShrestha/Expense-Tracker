@@ -6,6 +6,7 @@ import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
+import { Checkbox } from '../../../components/ui/checkbox';
 import { toast } from 'sonner';
 import { Wallet } from 'lucide-react';
 
@@ -18,6 +19,9 @@ export function LoginPage() {
     const [signupName, setSignupName] = useState('');
     const [signupEmail, setSignupEmail] = useState('');
     const [signupPassword, setSignupPassword] = useState('');
+    const [signupIsOrgAccount, setSignupIsOrgAccount] = useState(false);
+    const [signupOrgName, setSignupOrgName] = useState('');
+    const [signupOrgDescription, setSignupOrgDescription] = useState('');
     const [loginInlineError, setLoginInlineError] = useState('');
     const [signupInlineError, setSignupInlineError] = useState('');
 
@@ -46,8 +50,26 @@ export function LoginPage() {
             return;
         }
 
+        if (signupIsOrgAccount && (!signupOrgName)) {
+            setSignupInlineError('Please enter organization name');
+            toast.error('Please enter organization name');
+            return;
+        }
+
         try {
-            await signup(signupName, signupEmail, signupPassword);
+            const signupData = {
+                name: signupName,
+                email: signupEmail,
+                password: signupPassword,
+            };
+
+            if (signupIsOrgAccount) {
+                signupData.isOrgAccount = true;
+                signupData.organizationName = signupOrgName;
+                signupData.organizationDescription = signupOrgDescription;
+            }
+
+            await signup(signupData);
             toast.success('Account created successfully!');
             navigate('/');
         } catch (error) {
@@ -168,6 +190,46 @@ export function LoginPage() {
                                             required
                                         />
                                     </div>
+
+                                    <div className="flex items-center space-x-2 pt-2">
+                                        <Checkbox
+                                            id="org-account"
+                                            checked={signupIsOrgAccount}
+                                            onCheckedChange={(checked) => setSignupIsOrgAccount(checked)}
+                                        />
+                                        <Label htmlFor="org-account" className="font-normal cursor-pointer">
+                                            Creating account for organizational use
+                                        </Label>
+                                    </div>
+
+                                    {signupIsOrgAccount && (
+                                        <div className="space-y-3 pt-2 border-t">
+                                            <p className="text-xs text-muted-foreground">
+                                                You'll become the organization admin and can add employees
+                                            </p>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="org-name">Organization Name</Label>
+                                                <Input
+                                                    id="org-name"
+                                                    type="text"
+                                                    placeholder="Acme Corporation"
+                                                    value={signupOrgName}
+                                                    onChange={(e) => setSignupOrgName(e.target.value)}
+                                                    required={signupIsOrgAccount}
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="org-description">Organization Description (Optional)</Label>
+                                                <Input
+                                                    id="org-description"
+                                                    type="text"
+                                                    placeholder="Brief description of your organization"
+                                                    value={signupOrgDescription}
+                                                    onChange={(e) => setSignupOrgDescription(e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
 
                                     <Button type="submit" className="w-full">
                                         Create Account

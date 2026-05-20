@@ -234,11 +234,11 @@ export function AppProvider({ children }) {
     clearSession();
   };
 
-  const signup = async (name, email, password) => {
+  const signup = async (signupData) => {
     try {
       const response = await apiRequest('/auth/signup', {
         method: 'POST',
-        body: { name, email, password },
+        body: signupData,
       });
 
       const token = response.token;

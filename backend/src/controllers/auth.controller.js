@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import bcrypt from 'bcryptjs';
-import { query, sanitizeUser, userSelectColumns } from '../services/db.service.js';
+import { query, sanitizeUser, userSelectColumns, organizationSelectColumns, withTransaction } from '../services/db.service.js';
 import { signToken } from '../services/auth.service.js';
 
 const BCRYPT_ROUNDS = 10;
@@ -10,7 +10,7 @@ function isBcryptHash(value) {
 }
 
 export async function signup(req, res) {
-  const { name, email, password } = req.body;
+  const { name, email, password, isOrgAccount, organizationName, organizationDescription } = req.body;
 
   const normalizedEmail = String(email).trim().toLowerCase();
   const exists = await query('SELECT 1 FROM users WHERE email = $1 LIMIT 1', [normalizedEmail]);
@@ -20,18 +20,57 @@ export async function signup(req, res) {
   }
 
   const hashedPassword = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
+  const userId = nanoid();
+  let organization = null;
 
-  const { rows } = await query(
-    `INSERT INTO users (id, name, email, password, role)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING ${userSelectColumns}`,
-    [nanoid(), name, normalizedEmail, hashedPassword, 'user']
-  );
+  if (isOrgAccount && organizationName) {
+    // Create user as organization_head with organization
+    try {
+      const result = await withTransaction(async (db) => {
+        const { rows: userRows } = await db.query(
+          `INSERT INTO users (id, name, email, password, role)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING ${userSelectColumns}`,
+          [userId, name, normalizedEmail, hashedPassword, 'organization_head']
+        );
 
-  const newUser = rows[0];
+        const orgId = nanoid();
+        const { rows: orgRows } = await db.query(
+          `INSERT INTO organizations (id, name, description, head_id)
+           VALUES ($1, $2, $3, $4)
+           RETURNING ${organizationSelectColumns}`,
+          [orgId, organizationName, organizationDescription || '', userId]
+        );
 
-  const token = signToken(newUser);
-  return res.status(201).json({ token, user: sanitizeUser(newUser) });
+        return {
+          user: userRows[0],
+          organization: orgRows[0],
+        };
+      });
+
+      const newUser = result.user;
+      organization = result.organization;
+
+      const token = signToken(newUser);
+      return res.status(201).json({ token, user: sanitizeUser(newUser), organization });
+    } catch (error) {
+      console.error('Organization signup error:', error);
+      return res.status(500).json({ message: 'Failed to create organization' });
+    }
+  } else {
+    // Regular user account
+    const { rows } = await query(
+      `INSERT INTO users (id, name, email, password, role)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING ${userSelectColumns}`,
+      [userId, name, normalizedEmail, hashedPassword, 'user']
+    );
+
+    const newUser = rows[0];
+
+    const token = signToken(newUser);
+    return res.status(201).json({ token, user: sanitizeUser(newUser) });
+  }
 }
 
 export async function login(req, res) {
