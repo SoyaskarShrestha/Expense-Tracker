@@ -212,7 +212,7 @@ export function AdminPanelPage() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="text-right font-medium">${expense.amount.toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-medium">${Number(expense.amount || 0).toFixed(2)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -241,7 +241,7 @@ export function AdminPanelPage() {
                         <TableCell>{request.reason}</TableCell>
                         <TableCell><Badge variant="outline">{request.status}</Badge></TableCell>
                         <TableCell>{request.respondedByName || 'Unreviewed'}</TableCell>
-                        <TableCell className="text-right font-medium">${request.amount.toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-medium">${Number(request.amount || 0).toFixed(2)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

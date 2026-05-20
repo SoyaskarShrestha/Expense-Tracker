@@ -203,7 +203,7 @@ export function PersonalExpensesPage() {
       ? personalExpenses
       : personalExpenses.filter((expense) => expense.category === filterCategory);
 
-  const totalAmount = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const totalAmount = filteredExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
 
   const recurringExpenses = personalExpenses.filter((expense) => expense.recurrence && expense.recurrence !== 'none');
 
@@ -406,7 +406,7 @@ export function PersonalExpensesPage() {
             <CardDescription>Current total for the filtered view</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">${totalAmount.toFixed(2)}</p>
+            <p className="text-2xl font-bold">${Number(totalAmount).toFixed(2)}</p>
             <p className="text-xs text-muted-foreground mt-1">
               {filteredExpenses.length} transaction{filteredExpenses.length !== 1 ? 's' : ''}
             </p>
@@ -460,7 +460,7 @@ export function PersonalExpensesPage() {
                       <p className="font-medium">{expense.description}</p>
                       <p className="text-sm text-muted-foreground">{expense.category}</p>
                     </div>
-                    <Badge variant="outline">${expense.amount.toFixed(2)}</Badge>
+                    <Badge variant="outline">${Number(expense.amount || 0).toFixed(2)}</Badge>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Badge variant="secondary">
@@ -552,7 +552,7 @@ export function PersonalExpensesPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{expense.paymentMethod}</TableCell>
-                      <TableCell className="text-right font-bold">${expense.amount.toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-bold">${Number(expense.amount || 0).toFixed(2)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
                           <Button variant="ghost" size="icon" onClick={() => handleEdit(expense)}>

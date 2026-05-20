@@ -382,7 +382,7 @@ export function SettingsPage() {
                 </CardContent>
             </Card>
 
-            <Card>
+            {/* <Card>
                 <CardHeader>
                     <CardTitle>About</CardTitle>
                     <CardDescription>Application information</CardDescription>
@@ -407,7 +407,7 @@ export function SettingsPage() {
                         <span className="font-medium">{storageUsedKb} KB</span>
                     </div>
                 </CardContent>
-            </Card>
+            </Card> */}
         </div>
     );
 }

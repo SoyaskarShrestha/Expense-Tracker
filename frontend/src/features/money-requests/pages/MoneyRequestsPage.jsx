@@ -63,7 +63,7 @@ function RequestTable({ requests, onApprove, onReject, getOrganizationName, canM
                 <TableCell>
                   <Badge variant="outline">{getOrganizationName(request.organizationId)}</Badge>
                 </TableCell>
-                <TableCell className="font-bold">${request.amount.toFixed(2)}</TableCell>
+                <TableCell className="font-bold">${Number(request.amount || 0).toFixed(2)}</TableCell>
                 <TableCell className="max-w-xs truncate">{request.reason}</TableCell>
                 <TableCell className="text-sm text-muted-foreground">
                   {new Date(request.requestedAt).toLocaleDateString()}
@@ -256,11 +256,11 @@ export function MoneyRequestsPage() {
   );
 
   const totalPending = useMemo(
-    () => pendingRequests.reduce((sum, request) => sum + request.amount, 0),
+    () => pendingRequests.reduce((sum, request) => sum + Number(request.amount || 0), 0),
     [pendingRequests]
   );
   const totalApproved = useMemo(
-    () => approvedRequests.reduce((sum, request) => sum + request.amount, 0),
+    () => approvedRequests.reduce((sum, request) => sum + Number(request.amount || 0), 0),
     [approvedRequests]
   );
 
@@ -385,14 +385,16 @@ export function MoneyRequestsPage() {
             }
           }}
         >
-          <DialogContent>
+              <DialogContent>
             <DialogHeader>
               <DialogTitle>
                 {reviewDialog.status === 'approved' ? 'Approve Request' : 'Reject Request'}
               </DialogTitle>
               <DialogDescription>
                 {reviewDialog.request
-                  ? `${reviewDialog.request.employeeName} · ${getOrganizationName(reviewDialog.request.organizationId)} · $${reviewDialog.request.amount.toFixed(2)}`
+                  ? `${reviewDialog.request.employeeName} · ${getOrganizationName(reviewDialog.request.organizationId)} · $${Number(
+                      reviewDialog.request.amount || 0
+                    ).toFixed(2)}`
                   : 'Review this money request'}
               </DialogDescription>
             </DialogHeader>

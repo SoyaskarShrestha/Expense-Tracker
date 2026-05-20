@@ -97,7 +97,7 @@ export function DashboardCharts({ isPersonal, categoryData, expensesByDate, hasE
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold">${expense.amount.toFixed(2)}</p>
+                    <p className="font-bold">${Number(expense.amount || 0).toFixed(2)}</p>
                     <p className="text-xs text-muted-foreground">
                       {new Date(expense.date).toLocaleDateString()}
                     </p>
@@ -155,8 +155,8 @@ export function DashboardCharts({ isPersonal, categoryData, expensesByDate, hasE
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart
                   data={moneyRequests.slice(0, 5).map((request) => ({
-                    name: request.employeeName.split(' ')[0],
-                    amount: request.amount,
+                    name: (request.employeeName || '').split(' ')[0],
+                    amount: Number(request.amount || 0),
                   }))}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
@@ -189,7 +189,7 @@ export function DashboardCharts({ isPersonal, categoryData, expensesByDate, hasE
                 </div>
                 <div className="text-right flex items-center gap-3">
                   <div>
-                    <p className="font-bold">${request.amount.toFixed(2)}</p>
+                    <p className="font-bold">${Number(request.amount || 0).toFixed(2)}</p>
                     <p className="text-xs text-muted-foreground">
                       {new Date(request.requestedAt).toLocaleDateString()}
                     </p>

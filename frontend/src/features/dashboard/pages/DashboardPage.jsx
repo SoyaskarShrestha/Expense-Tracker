@@ -29,14 +29,15 @@ export function DashboardPage() {
   } = useApp();
 
   const totalPersonalExpense = useMemo(
-    () => personalExpenses.reduce((sum, expense) => sum + expense.amount, 0),
+    () => personalExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0),
     [personalExpenses]
   );
 
   const expensesByCategory = useMemo(
     () =>
       personalExpenses.reduce((acc, expense) => {
-        acc[expense.category] = (acc[expense.category] || 0) + expense.amount;
+        const amt = Number(expense.amount || 0);
+        acc[expense.category] = (acc[expense.category] || 0) + amt;
         return acc;
       }, {}),
     [personalExpenses]
@@ -45,7 +46,7 @@ export function DashboardPage() {
   const categoryData = useMemo(
     () =>
       Object.entries(expensesByCategory)
-        .map(([name, value]) => ({ name, value: Number(value.toFixed(2)) }))
+        .map(([name, value]) => ({ name, value: Number(Number(value).toFixed(2)) }))
         .filter((item) => item.value > 0),
     [expensesByCategory]
   );
@@ -60,7 +61,7 @@ export function DashboardPage() {
     return last7Days.map((date) => {
       const total = personalExpenses
         .filter((expense) => expense.date === date)
-        .reduce((sum, expense) => sum + expense.amount, 0);
+        .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
 
       return {
         date: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
@@ -80,7 +81,7 @@ export function DashboardPage() {
     () =>
       moneyRequests
         .filter((request) => request.status === 'approved')
-        .reduce((sum, request) => sum + request.amount, 0),
+        .reduce((sum, request) => sum + Number(request.amount || 0), 0),
     [moneyRequests]
   );
 
@@ -88,7 +89,7 @@ export function DashboardPage() {
     () =>
       moneyRequests
         .filter((request) => request.status === 'pending')
-        .reduce((sum, request) => sum + request.amount, 0),
+        .reduce((sum, request) => sum + Number(request.amount || 0), 0),
     [moneyRequests]
   );
 
@@ -111,7 +112,7 @@ export function DashboardPage() {
   const managedEmployeesCount = useMemo(() => employees.length, [employees]);
 
   const totalRequestedAmount = useMemo(
-    () => moneyRequests.reduce((sum, request) => sum + request.amount, 0),
+    () => moneyRequests.reduce((sum, request) => sum + Number(request.amount || 0), 0),
     [moneyRequests]
   );
 
